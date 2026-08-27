@@ -1,0 +1,11 @@
+# Agent instructions -- local only
+CLAUDE.md
+
+# Superseded documentation -- local only
+README_OLD.md
+
+# Generated output: install.sh rebuilds this
+build/
+
+# macOS
+.DS_Store
