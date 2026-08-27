@@ -32,7 +32,10 @@ die()  { printf '\033[31m error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- toolchain --
 
-command -v clang >/dev/null 2>&1 \
+# /usr/bin/clang is a stub that macOS ships even with no developer tools, so
+# "command -v clang" always succeeds. Ask xcrun instead: it resolves the tool
+# in the active developer directory and fails when nothing is installed.
+xcrun --find clang >/dev/null 2>&1 \
   || die "clang not found. Install the Xcode command line tools:  xcode-select --install"
 
 # ------------------------------------------------------------- find the DAC --
