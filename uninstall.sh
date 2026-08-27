@@ -21,6 +21,7 @@ say "Removing files"
 sudo rm -f "$DAEMON_PLIST" \
            "$SBIN/dac-reinitd" \
            "$SBIN/usb-reenumerate" \
+           "$SBIN/dac-audio-park" \
            "$SBIN/audio-bounce" \
            "$SBIN/dac-reinit-hook.sh" \
            "$SBIN/dac-reinit.sh"

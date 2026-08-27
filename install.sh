@@ -5,6 +5,7 @@
 #   ./install.sh                          # list USB audio devices and pick one
 #   ./install.sh --match "FiiO K5 Pro" -y # non-interactive
 #   ./install.sh --match "..." --settle-ms 400
+#   ./install.sh --match "..." --park "Mac mini Speakers"
 #
 set -euo pipefail
 
@@ -13,15 +14,16 @@ SBIN=/usr/local/sbin
 DAEMON_PLIST=/Library/LaunchDaemons/local.dacreinit.plist
 LABEL=local.dacreinit
 
-MATCH=""; SETTLE=400; COOLDOWN=3000; ASSUME_YES=0
+MATCH=""; SETTLE=400; COOLDOWN=3000; PARK=""; ASSUME_YES=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --match)       MATCH="$2"; shift 2 ;;
     --settle-ms)   SETTLE="$2"; shift 2 ;;
     --cooldown-ms) COOLDOWN="$2"; shift 2 ;;
+    --park)        PARK="$2"; shift 2 ;;
     -y|--yes)      ASSUME_YES=1; shift ;;
-    -h|--help)     sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help)     sed -n '2,9p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -97,7 +99,21 @@ say "Building..."
 BUILD="$HERE/build"; mkdir -p "$BUILD"
 clang -O2 -Wall -o "$BUILD/dac-reinitd"     "$HERE/src/dac-reinitd.c"     -framework CoreFoundation -framework IOKit
 clang -O2 -Wall -o "$BUILD/usb-reenumerate" "$HERE/src/usb-reenumerate.c" -framework CoreFoundation -framework IOKit
-say "Built 2 binaries into build/"
+clang -O2 -Wall -o "$BUILD/dac-audio-park"  "$HERE/src/dac-audio-park.c"  -framework CoreFoundation -framework CoreAudio
+say "Built 3 binaries into build/"
+
+# ------------------------------------------------------------- park device --
+
+# While the DAC is re-enumerated its Core Audio object is destroyed and
+# rebuilt. Applications playing through it need somewhere else to render for
+# those two seconds, or they stall until the user presses play. The built-in
+# speakers are the safe target: they have a real clock, and a failed restore is
+# audible instead of silent.
+if [ -z "$PARK" ]; then
+  PARK="$("$BUILD/dac-audio-park" show 2>/dev/null \
+          | awk -F'\t' '/uid=BuiltInSpeakerDevice$/{sub(/^name=/,"",$3); print $3; exit}')"
+  [ -n "$PARK" ] || PARK="MacBook Pro Speakers"
+fi
 
 # --------------------------------------------------------------- generate ----
 
@@ -106,6 +122,7 @@ xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>
 sed -e "s|@MATCH@|$(xml_escape "$MATCH")|g" \
     -e "s|@SETTLE@|$SETTLE|g" \
     -e "s|@COOLDOWN@|$COOLDOWN|g" \
+    -e "s|@PARK@|$(xml_escape "$PARK")|g" \
     "$HERE/templates/local.dacreinit.plist.in" > "$BUILD/local.dacreinit.plist"
 
 plutil -lint "$BUILD/local.dacreinit.plist" >/dev/null || die "generated plist is invalid"
@@ -115,7 +132,8 @@ say "About to install:"
 echo "    device      : $MATCH"
 echo "    settle      : ${SETTLE}ms"
 echo "    cooldown    : ${COOLDOWN}ms"
-echo "    binaries    -> $SBIN/{dac-reinitd,usb-reenumerate}"
+echo "    park device : $PARK"
+echo "    binaries    -> $SBIN/{dac-reinitd,usb-reenumerate,dac-audio-park}"
 echo "    daemon      -> $DAEMON_PLIST  (runs as root, starts at boot)"
 echo
 if [ "$ASSUME_YES" -ne 1 ]; then
@@ -131,6 +149,7 @@ sudo launchctl bootout "system/$LABEL" 2>/dev/null || true
 
 sudo install -o root -g wheel -m 755 "$BUILD/dac-reinitd"       "$SBIN/dac-reinitd"
 sudo install -o root -g wheel -m 755 "$BUILD/usb-reenumerate"   "$SBIN/usb-reenumerate"
+sudo install -o root -g wheel -m 755 "$BUILD/dac-audio-park"    "$SBIN/dac-audio-park"
 sudo install -o root -g wheel -m 644 "$BUILD/local.dacreinit.plist" "$DAEMON_PLIST"
 
 sudo launchctl bootstrap system "$DAEMON_PLIST"
