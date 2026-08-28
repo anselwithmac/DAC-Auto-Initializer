@@ -10,7 +10,7 @@ the expected result is the DAC resumed its connection, and playback resumes.
 
 This application fixes an issue where *some* USB DAC amps fail to reinitialize, causing audio applications to stall or break in unusual ways.
 
-It also addresses a USB DAC that stops playing audio after a KVM or USB hub switch flips back to your Mac,
+It also addresses a USB DAC that stops playing audio, or audio becomes glitchy after a KVM or USB hub switch flips back to your Mac,
 so you don't have to physically unplug and replug it every time.
 
 ## In A Nutshell
@@ -18,20 +18,9 @@ so you don't have to physically unplug and replug it every time.
 `dac-reinit` performs a virtual re-plug. The daemon waits for your DAC to appear
 on the USB bus. When that happens, it does three things:
 
-1. It moves the sound output to your built-in speakers.
+1. The app moved the output channel to your mac's preferred fallback.
 2. It re-enumerates the DAC over USB, which is the software equivalent of a replug.
-3. It moves the sound output back to the DAC.
-
-Step 2 is what repairs the device. Steps 1 and 3 are what keep your music,
-videos and games playing.
-
-This is the part that matters. A re-enumeration on its own destroys and rebuilds
-the DAC so quickly that macOS reports it as a single swap, with no working
-output device in between. Every application playing audio is cut off, and stays
-stuck until you press play by hand. Giving those applications the speakers to
-play through for two seconds is what stops that. Measured on a stalled player:
-with the park it resumes on its own in about 2.6 seconds, and without it, it
-never resumes.
+3. Then it puts everything back to how it was. In most cases, this puts it back on your DAC automatically.
 
 This should allow you to dock and undock your mac throughout the day, or use USB switches 
 to control multiple computers with the same Keyboard, Mouse and headphones.
@@ -142,8 +131,84 @@ The simpler alternative is to run `./install.sh` again with the new values.
 
 ## Troubleshooting
 
-**No sound, and the log is empty.** The daemon did not see the device. Confirm
-that the name matches.
+Start with the log. It answers most questions on its own:
+
+```bash
+sudo tail -40 /var/log/dac-reinit.log
+```
+
+A healthy repair looks like this, and takes about one and a half seconds:
+
+```
+DAC appeared -- settling 400ms
+  parked on "MacBook Pro Speakers" (was "AppleUSBAudioEngine:...:FiiO K5 Pro:143400:1")
+re-enumerate attempt 1: OK
+  restored the default output
+done (cooldown 3000ms from now)
+```
+
+To see the sound devices the way the helper sees them, with their UIDs:
+
+```bash
+/usr/local/sbin/dac-audio-park show
+```
+
+---
+
+**Audio comes back, but the app stays stuck until you press play.**
+
+The park did not happen. Look for the `parked on` line. If it is missing, look
+just above it for `park failed` or `no console user`. The park is the step that
+keeps applications alive, so without it they stall.
+
+**The log shows `restore FAILED` and the sound output is stuck on the speakers.**
+
+This is a safe failure, not a broken install. The sound output is left on the
+speakers on purpose, so that the problem is audible instead of silent.
+
+The next switch repairs it by itself. To fix it immediately instead, switch the
+output back by hand, or run:
+
+```bash
+sudo /usr/local/sbin/usb-reenumerate "FiiO K5 Pro"
+```
+
+If it happens on every switch, your DAC takes longer than the timeout to return.
+Raise it:
+
+```bash
+./install.sh --match "FiiO K5 Pro" --restore-timeout-ms 40000 -y
+```
+
+**I flipped the switch several times quickly and ended up on the speakers.**
+
+Expected. A restore fails if the device leaves again while it is running,
+because the device really is gone. The next switch puts the DAC back with no
+action from you.
+
+**The log shows `no console user -- skipping park/restore`.**
+
+Nobody is logged in, so there is no sound session to change. The daemon still
+repairs the device. The sound output moves when you log in.
+
+**The whole thing takes several seconds.**
+
+Most of that is not the daemon. The daemon needs about one and a half seconds.
+The rest is your switch re-presenting the device on the USB bus, which took 7 to
+57 seconds in testing. Compare the `DAC appeared` timestamp with the moment you
+pressed the switch to see the split.
+
+To shave the daemon's share, lower the settle delay. It runs before the park:
+
+```bash
+./install.sh --match "FiiO K5 Pro" --settle-ms 200 -y
+```
+
+Do not raise `--settle-ms` to make things faster. It adds delay.
+
+**No sound, and the log is empty.**
+
+The daemon did not see the device. Confirm the name:
 
 ```bash
 ioreg -w0 -l -r -c IOUSBHostDevice | grep '"USB Product Name"'
@@ -151,46 +216,34 @@ ioreg -w0 -l -r -c IOUSBHostDevice | grep '"USB Product Name"'
 
 Then install again and pick your device.
 
-**The log shows `re-enumerate attempt 1: failed` with a `0x...` code.** The
-seize failed. This is almost always a permission problem. Confirm that the
+**The log shows `re-enumerate attempt 1: failed` with a `0x...` code.**
+
+The seize failed, which is almost always a permission problem. Confirm that the
 daemon runs as root. If you ran `usb-reenumerate` by hand, add `sudo`.
 
-**The log shows `DAC already present at startup -- not acting`.** This is
-correct. The daemon does not repair a device that was connected before it
-started.
+**The log shows `DAC already present at startup -- not acting`.**
 
-**Sound returns, but only after a long delay.** Increase the settle time. Some
-devices need more time on the bus before they accept a re-enumeration:
+This is correct. The daemon does not repair a device that was connected before
+the daemon started.
+
+**The daemon fires more than once per switch.**
+
+Raise the cooldown with `--cooldown-ms`.
+
+**The audio is still glitchy after a successful repair.**
+
+The re-enumeration did not clear it. Run it again by hand and listen:
+
+```bash
+sudo /usr/local/sbin/usb-reenumerate "FiiO K5 Pro"
+```
+
+If that clears it and the daemon does not, the daemon is acting too early.
+Raise the settle delay so the device is steady before it is seized:
 
 ```bash
 ./install.sh --match "FiiO K5 Pro" --settle-ms 1000 -y
 ```
-
-**The daemon fires more than once per switch.** Increase the cooldown with
-`--cooldown-ms`.
-
-**The log shows `no console user -- skipping park/restore`.** Nobody is logged
-in, so there is no sound session to change. The daemon still repairs the device.
-
-**The log shows `restore FAILED`.** Your sound output is left on the speakers on
-purpose, so the failure is audible rather than silent. The next switch repairs
-it by itself. This is the expected result if you flip the switch again while a
-repair is still running. If it keeps happening, the DAC is taking longer than the timeout
-to come back. Raise it:
-
-```bash
-./install.sh --match "FiiO K5 Pro" --restore-timeout-ms 40000 -y
-```
-
-To see what the sound helper sees, run:
-
-```bash
-/usr/local/sbin/dac-audio-park show
-```
-
-**Audio comes back, but the app stays stuck until you press play.** The park did
-not happen. Check the log for `parked on`. If that line is missing, look for a
-`park failed` or `no console user` line above it.
 
 ## Diagnostics
 
