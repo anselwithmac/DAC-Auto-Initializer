@@ -70,7 +70,7 @@ boot.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--match <name>` | (interactive prompt) | Manually pick your USB device by name. The match is case-insensitive. |
-| `--settle-ms <N>` | `400` (time in miliseconds)| The delay after the device appears, before the re-enumeration. |
+| `--settle-ms <N>` | `400` (time in miliseconds)| The delay after the device appears, before the park and re-enumeration. |
 | `--cooldown-ms <N>` | `3000` (time in miliseconds)| The period after a re-enumeration in which the daemon ignores new arrivals. |
 | `--park <name>` | your built-in speakers | The output device to hold audio on during the repair. The installer detects this for you. |
 | `--restore-timeout-ms <N>` | `20000` (time in miliseconds)| How long to wait for the DAC to come back before giving up on the restore. |
@@ -78,7 +78,7 @@ boot.
 
 ## Visually verify
 
-You can optionally run this in terminal to watch your USB connect and disconnect events in team time.
+You can optionally run this in terminal to watch the daemon's USB connect and disconnect events in team time.
 
 Good for checking and debugging.
 
